@@ -1,0 +1,16 @@
+node_modules/
+frontend/dist/
+.venv/
+__pycache__/
+.pytest_cache/
+.env
+.env.*
+!.env.example
+.deployment/
+test-results/
+playwright-report/
+*.log
+*.pyc
+verification/private/
+firebase-debug.log
+firestore-debug.log

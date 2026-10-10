@@ -1,0 +1,10 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ['build', '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/stylereel/app:${_VERSION}', '.']
+images: ['${_REGION}-docker.pkg.dev/$PROJECT_ID/stylereel/app:${_VERSION}']
+options:
+  logging: CLOUD_LOGGING_ONLY
+timeout: 1200s
+substitutions:
+  _REGION: asia-south1
+  _VERSION: latest

@@ -1,0 +1,50 @@
+[
+  {
+    "id": "sample-sports-tshirt",
+    "name": "Sports T-shirt",
+    "category_id": "tshirts",
+    "description": "Licensed demo asset; replace with your store product photos for retail evaluation.",
+    "file": "sports-tshirt.png",
+    "license": "CC0 1.0",
+    "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Sports_T-Shirt.png",
+    "attribution": "Kuttos2",
+    "sha256": "a1122cc2de919c9054454e3a4a0eb2230d9f72d987dcfeaee2920bb8f2486a69"
+  },
+  {
+    "id": "sample-cream-dress",
+    "name": "Poiret cream dress · museum sample",
+    "category_id": "dresses",
+    "description": "Licensed demo asset; replace with your store product photos for retail evaluation.",
+    "file": "cream-dress.jpg",
+    "license": "CC0 1.0",
+    "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Dress_MET_DP143261.jpg",
+    "attribution": "Paul Poiret",
+    "sha256": "7c4c39f6d9d16790ed0f9368eba61d3611dc7ccb7c4c8247bd15cd2b04aac9b3"
+  },
+  {
+    "id": "sample-cotton-skirt",
+    "name": "Cotton skirt · museum sample",
+    "category_id": "skirts",
+    "description": "Licensed demo asset; replace with your store product photos for retail evaluation.",
+    "file": "cotton-skirt.jpg",
+    "license": "CC0 1.0",
+    "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Skirt_MET_55.26.87_CP1.jpg",
+    "attribution": "",
+    "sha256": "3b607bdda8cdbdd35a176c15ca482e2356d5666798009f7dc97686e734930427"
+  },
+  {
+    "id": "sample-saree",
+    "name": "Saree · experimental sample",
+    "category_id": "sarees",
+    "description": "Licensed demo asset; replace with your store product photos for retail evaluation.",
+    "file": "saree.jpg",
+    "license": "CC0 1.0",
+    "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Saree_image.jpg",
+    "attribution": "Mohanraj55",
+    "sha256": "492968f6f413306c158cda11b68f852899d291c11f2a3ee0d3c85c3a7420a2c2"
+  }
+]
