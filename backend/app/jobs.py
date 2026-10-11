@@ -5,7 +5,7 @@ import uuid
 from fastapi import HTTPException
 from .infrastructure import now
 from .models import Settings, TryOnRequest
-from .providers import ProviderError, estimate, reported_cost_usd, render_instructions
+from .providers import ProviderError, estimate, reported_cost_usd, render_instructions, garment_contact_sheet
 from .images import normalize_image
 
 TERMINAL = {'succeeded', 'failed', 'unknown'}
@@ -72,17 +72,23 @@ class JobService:
                 category = self.store.get('categories', garment['category_id'])
                 if not category:
                     raise HTTPException(400, 'A garment category is unavailable.')
-                garments.append({**garment, 'slot': category['slot'], 'experimental': bool(category.get('experimental'))})
+                keys = list(garment.get('image_keys') or ([garment['image_key']] if garment.get('image_key') else []))
+                if not keys:
+                    raise HTTPException(400, 'A selected garment has no reference photos.')
+                garments.append({**garment, 'image_keys': keys, 'slot': category['slot'], 'experimental': bool(category.get('experimental'))})
             if len(garments) == 2 and {g['slot'] for g in garments} != {'upper', 'lower'}:
                 raise HTTPException(400, 'Two garments must be one upper and one lower garment.')
             garments.sort(key=lambda g: 0 if g['slot'] == 'upper' else 1)
         elif request.garment_ids:
             raise HTTPException(400, 'Held-garment processing does not use catalog references.')
-        calls, cost = estimate(settings, len(garments), workflow)
+        groups = [{'garment_id': garment['id'], 'image_keys': list(garment['image_keys'])} for garment in garments]
+        reference_count = sum(len(group['image_keys']) for group in groups)
+        calls, cost = estimate(settings, len(garments), workflow, reference_count=reference_count)
         job_id = uuid.uuid4().hex
         created = now()
         job = {'id': job_id, 'user_id': uid, 'upload_id': upload['id'], 'source_key': upload['key'], 'garments': garments,
-               'garment_names': [g['name'] for g in garments], 'workflow': workflow, 'status': 'queued', 'stage': 'ready',
+               'garment_names': [g['name'] for g in garments], 'garment_reference_groups': groups,
+               'reference_count': reference_count, 'workflow': workflow, 'status': 'queued', 'stage': 'ready',
                'created_at': created, 'updated_at': created, 'expected_calls': calls, 'estimated_cost_usd': cost,
                'settings': settings.model_dump(), 'attempts': 0, 'step': 0, 'preflight_done': False,
                'enqueue_state': 'pending', 'budget_month': created.strftime('%Y-%m'), 'expires_at': created + timedelta(hours=24)}
@@ -316,15 +322,30 @@ class JobService:
                     self._update(job_id, preflight_done=True, stage='ready', lease_until=now())
                     self.enqueue(job_id)
                     return
-                references = [self.objects.get('catalog', g['image_key']) for g in job['garments']]
+                # Read only the immutable reference keys captured at submission; changes
+                # to catalog labels/photos must not silently alter an accepted generation.
+                groups = job.get('garment_reference_groups')
+                if groups is None:  # Jobs accepted by older releases used one image per garment.
+                    groups = [{'garment_id': g.get('id'), 'image_keys': list(g.get('image_keys') or [g['image_key']])} for g in job['garments']]
+                instructions = job.get('render_instructions', render_instructions(job['garments'], job['workflow']))
                 if settings.ai.provider == 'fashn':
-                    references = references[job['step']:job['step'] + 1]
+                    group = groups[job['step']]
+                    views = [self.objects.get('catalog', key) for key in group['image_keys']]
+                    references = [garment_contact_sheet(views)]
+                    # FASHN still receives exactly one garment in each sequential call.
+                    instructions = render_instructions([{**job['garments'][job['step']], 'image_keys': ['contact-sheet']}], job['workflow'])
+                    if len(views) > 1:
+                        instructions.append('GARMENT REFERENCE 1 is a multi-view sheet of ONE garment. '
+                                            'Use all panels together for its appearance; do not copy the sheet layout '
+                                            'or any reference model into the finished photograph.')
+                else:
+                    references = [self.objects.get('catalog', key) for group in groups for key in group['image_keys']]
                 if not self._begin_call(job):
                     return
                 job['attempts'] += 1
                 self._update(job_id, stage='submitting', attempts=job['attempts'])
                 self.event(job['user_id'], 'provider_call', job_id=job_id, provider=settings.ai.provider, model=settings.ai.model, workflow=job['workflow'], estimated_cost_usd=job['estimated_cost_usd'] / job['expected_calls'])
-                result = provider.submit(source, references, settings, job['workflow'], job.get('render_instructions', render_instructions(job['garments'], job['workflow'])))
+                result = provider.submit(source, references, settings, job['workflow'], instructions)
                 if result.prediction_id:
                     job['prediction_id'] = result.prediction_id
                     self._update(job_id, prediction_id=result.prediction_id, stage='polling', lease_until=now())
@@ -353,7 +374,7 @@ class JobService:
             if current.get('stage') == 'submitting':
                 self.finish(job, 'unknown', 'The provider outcome could not be confirmed. This request will not be repeated.')
             else:
-                self.finish(job, 'failed', 'The generation could not complete. Please try again with a new photo.')
+                self.finish(job, 'failed', 'The generation could not complete. Please try again.')
 
     def maintenance(self):
         moment = now()

@@ -11,6 +11,7 @@ test-results/
 playwright-report/
 *.log
 *.pyc
-verification/private/
+verification/
+*.tsbuildinfo
 firebase-debug.log
 firestore-debug.log

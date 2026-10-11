@@ -59,10 +59,26 @@ class CategoryCreate(StrictModel):
     experimental: bool = False
 
 
+class CatalogLabelCreate(StrictModel):
+    kind: Literal['store', 'brand']
+    name: str = Field(min_length=1, max_length=100)
+
+    @field_validator('name')
+    @classmethod
+    def clean_name(cls, value):
+        import unicodedata
+        value = ' '.join(unicodedata.normalize('NFKC', value).split())
+        if not value or len(value) > 100:
+            raise ValueError('Choose a label name between 1 and 100 characters.')
+        return value
+
+
 class GarmentPatch(StrictModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=2000)
     category_id: str | None = Field(default=None, max_length=80)
+    store_id: str | None = Field(default=None, min_length=1, max_length=80)
+    brand_id: str | None = Field(default=None, min_length=1, max_length=80)
     active: bool | None = None
     license: str | None = Field(default=None, max_length=200)
     source_url: str | None = Field(default=None, max_length=2000)
@@ -123,13 +139,26 @@ class CategoryResponse(BaseModel):
     experimental: bool = False
 
 
+class CatalogLabelResponse(BaseModel):
+    id: str
+    name: str
+
+
+class CatalogLabelsResponse(BaseModel):
+    stores: list[CatalogLabelResponse] = Field(default_factory=list)
+    brands: list[CatalogLabelResponse] = Field(default_factory=list)
+
+
 class GarmentResponse(BaseModel):
     id: str
     name: str
     description: str = ''
     category_id: str
+    store_id: str | None = None
+    brand_id: str | None = None
     active: bool
     image_url: str
+    image_urls: list[str] = Field(default_factory=list)
     thumbnail_url: str
     license: str | None = None
     source_url: str | None = None

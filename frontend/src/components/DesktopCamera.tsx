@@ -120,8 +120,8 @@ export default function DesktopCamera({ onCapture, onClose, onUpload, holding }:
       </div>}
     </div>
     <p className="desktop-camera-guidance">{holding
-      ? 'Keep your face, full body, and the garment’s front and edges in view.'
-      : 'Stand back so your face and full body are visible. Use soft, even lighting.'}</p>
+      ? 'Include yourself and the dress in the photo.'
+      : 'Take a photo of yourself.'}</p>
     {error && <Notice tone="error">{error}</Notice>}
     {phase === 'paused' && <Notice>Your camera is paused. Resume it using your browser’s camera control, or close another tab using the camera. You can also upload a photo.</Notice>}
     <div className="desktop-camera-actions">

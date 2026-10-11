@@ -19,6 +19,7 @@ from .config import Environment, CATEGORIES
 from .infrastructure import FirestoreStore, ObjectStorage, TaskDispatcher, SecretStore, FirebaseIdentity, now
 from .models import Settings, UserCreate, UserPatch, PasswordChange, CategoryCreate, GarmentPatch, TryOnRequest, ShareRequest, ShareDownload, Credential, TaskBody
 from .models import UserResponse, CategoryResponse, GarmentResponse, UploadResponse, JobResponse, ShareResponse, SettingsResponse, EstimateRequest, EstimateResponse
+from .models import CatalogLabelCreate, CatalogLabelResponse, CatalogLabelsResponse
 from .jobs import JobService, owned, public_job, TERMINAL
 from .images import normalize_image, InvalidImage
 from .providers import ProviderRegistry, estimate
@@ -49,13 +50,18 @@ env = Environment()
 if env.cors_origins:
     app.add_middleware(CORSMiddleware, allow_origins=list(env.cors_origins), allow_credentials=False, allow_methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], allow_headers=['Authorization', 'Content-Type'])
 bearer = HTTPBearer(auto_error=False)
+MAX_GARMENT_PHOTOS = 6
+MAX_CATALOG_UPLOAD_BYTES = 28 * 1024 * 1024
+LABEL_COLLECTIONS = {'store': 'catalog_stores', 'brand': 'catalog_brands'}
 
 
 @app.middleware('http')
 async def security_headers(request: Request, call_next):
     # Reject oversized requests before multipart parser buffers them.
     length = request.headers.get('content-length')
-    if length and (not length.isdigit() or int(length) > env.max_upload_bytes + 1024 * 1024):
+    photo_count = MAX_GARMENT_PHOTOS if request.method == 'POST' and request.url.path in {'/api/garments', '/api/admin/garments'} else 1
+    request_limit = min(env.max_upload_bytes * photo_count, MAX_CATALOG_UPLOAD_BYTES) + 1024 * 1024
+    if length and (not length.isdigit() or int(length) > request_limit):
         return Response('Request exceeds the upload size limit.', status_code=413)
     response = await call_next(request)
     response.headers['X-Content-Type-Options'] = 'nosniff'
@@ -123,7 +129,12 @@ def settings_response(services):
 
 
 def view_garment(g):
-    return {k: v for k, v in g.items() if k not in {'image_key', 'thumbnail_key'}} | {'image_url': f'/api/garments/{g["id"]}/image', 'thumbnail_url': f'/api/garments/{g["id"]}/thumbnail'}
+    keys = g.get('image_keys') or [g['image_key']]
+    return {k: v for k, v in g.items() if k not in {'image_key', 'image_keys', 'thumbnail_key'}} | {
+        'image_url': f'/api/garments/{g["id"]}/image',
+        'image_urls': [f'/api/garments/{g["id"]}/photos/{index}' for index in range(len(keys))],
+        'thumbnail_url': f'/api/garments/{g["id"]}/thumbnail',
+    }
 
 
 @app.get('/healthz')
@@ -264,16 +275,51 @@ def categories(user=Depends(ready_user), services: Services = Depends(get_servic
 
 
 @app.post('/api/categories', status_code=201, response_model=CategoryResponse)
+@app.post('/api/admin/categories', status_code=201, response_model=CategoryResponse)
 def create_category(body: CategoryCreate, user=Depends(admin), services: Services = Depends(get_services)):
+    body.name = body.name.strip()
+    if not body.name:
+        raise HTTPException(400, 'Enter a type label.')
     if not body.id:
         import re
         body.id = re.sub(r'[^a-z0-9]+', '-', body.name.lower()).strip('-')[:50]
         if len(body.id) < 2 or not body.id[0].isalpha():
-            raise HTTPException(400, 'Choose a category name that starts with a letter.')
+            body.id = 'type-' + hashlib.sha256(body.name.casefold().encode()).hexdigest()[:24]
     if services.store.get('categories', body.id):
         raise HTTPException(409, 'Category already exists.')
     services.store.set('categories', body.id, body.model_dump())
     return body
+
+
+@app.get('/api/catalog/labels', response_model=CatalogLabelsResponse)
+def catalog_labels(user=Depends(ready_user), services: Services = Depends(get_services)):
+    return {
+        kind + 's': sorted(services.store.list(collection), key=lambda label: label['name'].casefold())
+        for kind, collection in LABEL_COLLECTIONS.items()
+    }
+
+
+@app.post('/api/admin/catalog/labels', status_code=201, response_model=CatalogLabelResponse)
+def create_catalog_label(body: CatalogLabelCreate, user=Depends(admin), services: Services = Depends(get_services)):
+    # A deterministic ID and transaction reuse the same label under concurrent creation.
+    identifier = body.kind + '-' + hashlib.sha256(body.name.casefold().encode()).hexdigest()[:24]
+    collection = LABEL_COLLECTIONS[body.kind]
+
+    def create(tx):
+        existing = tx.get(collection, identifier)
+        if existing:
+            return existing
+        value = {'id': identifier, 'name': body.name}
+        tx.set(collection, identifier, value)
+        return value
+
+    return services.store.atomic(create)
+
+
+def validate_garment_labels(store_id, brand_id, services):
+    for kind, identifier in [('store', store_id), ('brand', brand_id)]:
+        if identifier and not services.store.get(LABEL_COLLECTIONS[kind], identifier):
+            raise HTTPException(400, f'Unknown {kind} label.')
 
 
 @app.get('/api/garments', response_model=list[GarmentResponse])
@@ -283,21 +329,47 @@ def garments(user=Depends(ready_user), services: Services = Depends(get_services
 
 
 @app.post('/api/garments', status_code=201, response_model=GarmentResponse)
-def create_garment(file: UploadFile = File(...), name: str = Form(..., min_length=1, max_length=120), description: str = Form('', max_length=2000), category_id: str = Form(...), source_url: str = Form('', max_length=2000), license: str = Form('', max_length=200), attribution: str = Form('', max_length=1000), active: bool = Form(True), user=Depends(admin), services: Services = Depends(get_services)):
+@app.post('/api/admin/garments', status_code=201, response_model=GarmentResponse)
+def create_garment(file: UploadFile | None = File(None), files: list[UploadFile] | None = File(None), name: str = Form(..., min_length=1, max_length=120), description: str = Form('', max_length=2000), category_id: str = Form(...), store_id: str | None = Form(None, max_length=80), brand_id: str | None = Form(None, max_length=80), source_url: str = Form('', max_length=2000), license: str = Form('', max_length=200), attribution: str = Form('', max_length=1000), active: bool = Form(True), user=Depends(admin), services: Services = Depends(get_services)):
     if not services.store.get('categories', category_id):
         raise HTTPException(400, 'Unknown category.')
+    store_id, brand_id = store_id or None, brand_id or None
+    validate_garment_labels(store_id, brand_id, services)
     if source_url:
         from urllib.parse import urlsplit
         parsed = urlsplit(source_url)
         if parsed.scheme not in {'http', 'https'} or not parsed.hostname or parsed.username or parsed.password:
             raise HTTPException(400, 'Source URL must be an HTTP or HTTPS URL without credentials.')
-    image = normalize_image(file.file.read(services.env.max_upload_bytes + 1), services.env.max_upload_bytes)
+    photos = ([file] if file else []) + (files or [])
+    if not 1 <= len(photos) <= MAX_GARMENT_PHOTOS:
+        raise HTTPException(400, f'Provide between 1 and {MAX_GARMENT_PHOTOS} garment photos.')
+    # Decode every reference before writing any objects; one bad photo cannot leave a partial garment.
+    images, total_bytes = [], 0
+    for photo in photos:
+        contents = photo.file.read(services.env.max_upload_bytes + 1)
+        total_bytes += len(contents)
+        if total_bytes > MAX_CATALOG_UPLOAD_BYTES:
+            raise HTTPException(413, 'The dress photos exceed the 28 MB combined upload limit.')
+        images.append(normalize_image(contents, services.env.max_upload_bytes))
     identifier = uuid.uuid4().hex
     key, thumb = f'garments/{identifier}.jpg', f'thumbnails/{identifier}.jpg'
-    services.objects.put('catalog', key, image.data)
-    services.objects.put('catalog', thumb, image.thumbnail)
-    value = {'id': identifier, 'name': name, 'description': description, 'category_id': category_id, 'active': active, 'source_url': source_url, 'license': license, 'attribution': attribution, 'image_key': key, 'thumbnail_key': thumb, 'created_at': now()}
-    services.store.set('garments', identifier, value)
+    keys = [key] + [f'garments/{identifier}/{index}.jpg' for index in range(1, len(images))]
+    value = {'id': identifier, 'name': name, 'description': description, 'category_id': category_id, 'store_id': store_id, 'brand_id': brand_id, 'active': active, 'source_url': source_url, 'license': license, 'attribution': attribution, 'image_key': key, 'image_keys': keys, 'thumbnail_key': thumb, 'created_at': now()}
+    written = []
+    try:
+        for photo_key, image in zip(keys, images):
+            services.objects.put('catalog', photo_key, image.data)
+            written.append(photo_key)
+        services.objects.put('catalog', thumb, images[0].thumbnail)
+        written.append(thumb)
+        services.store.set('garments', identifier, value)
+    except Exception:
+        for photo_key in written:
+            try:
+                services.objects.delete('catalog', photo_key)
+            except Exception:
+                pass
+        raise
     return view_garment(value)
 
 
@@ -308,7 +380,10 @@ def patch_garment(identifier: str, body: GarmentPatch, user=Depends(admin), serv
         raise HTTPException(404, 'Garment not found.')
     if body.category_id and not services.store.get('categories', body.category_id):
         raise HTTPException(400, 'Unknown category.')
-    garment.update(body.model_dump(exclude_none=True))
+    validate_garment_labels(body.store_id, body.brand_id, services)
+    changes = body.model_dump(exclude_unset=True)
+    # Explicit null clears optional labels; keep legacy fields' null behavior unchanged.
+    garment.update({k: v for k, v in changes.items() if v is not None or k in {'store_id', 'brand_id'}})
     services.store.set('garments', identifier, garment)
     return view_garment(garment)
 
@@ -319,9 +394,20 @@ def delete_garment(identifier: str, user=Depends(admin), services: Services = De
     if not garment:
         raise HTTPException(404, 'Garment not found.')
     services.store.delete('garments', identifier)
-    for key in ['image_key', 'thumbnail_key']:
-        services.objects.delete('catalog', garment[key])
+    for key in set((garment.get('image_keys') or [garment['image_key']]) + [garment['image_key'], garment['thumbnail_key']]):
+        services.objects.delete('catalog', key)
     return {'success': True}
+
+
+@app.get('/api/garments/{identifier}/photos/{index}')
+def garment_photo(identifier: str, index: int, user=Depends(ready_user), services: Services = Depends(get_services)):
+    garment = services.store.get('garments', identifier)
+    if not garment or (not garment.get('active') and user['role'] != 'admin'):
+        raise HTTPException(404, 'Garment not found.')
+    keys = garment.get('image_keys') or [garment['image_key']]
+    if index < 0 or index >= len(keys):
+        raise HTTPException(404, 'Garment photo not found.')
+    return image_response(services.objects.get('catalog', keys[index]))
 
 
 @app.get('/api/garments/{identifier}/{variant}')
@@ -369,7 +455,14 @@ def upload_image(identifier: str, user=Depends(ready_user), services: Services =
 @app.post('/api/tryon/estimate', response_model=EstimateResponse)
 def estimate_job(body: EstimateRequest, user=Depends(ready_user), services: Services = Depends(get_services)):
     workflow = body.workflow
-    calls, cost = estimate(services.jobs.settings(), len(body.garment_ids) or 1, workflow)
+    reference_count = 0
+    if workflow == 'catalog':
+        for identifier in body.garment_ids:
+            garment = services.store.get('garments', identifier)
+            if not garment or not garment.get('active'):
+                raise HTTPException(400, 'Choose an available garment.')
+            reference_count += len(garment.get('image_keys') or [garment['image_key']])
+    calls, cost = estimate(services.jobs.settings(), len(body.garment_ids) or 1, workflow, reference_count=reference_count)
     return {'expected_calls': calls, 'estimated_cost_usd': cost}
 
 

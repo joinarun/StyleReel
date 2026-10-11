@@ -6,6 +6,12 @@ Deployed POC: [Open StyleReel](https://stylereel-ynpzfmjw7q-el.a.run.app). See [
 
 The app has catalog and experimental held-garment workflows, compatible two-item outfits, a generated-photo view with scrollable recent looks, an encrypted per-user IndexedDB gallery, downloads and revocable QR sharing. Laptops use a live webcam preview; Android/iPhone/iPad retain native camera capture. Saree jobs add complete-outfit draping instructions. Administration covers users, garments/categories, provider settings, usage limits, and estimated-cost analytics. Checkout and physical sizing are outside this POC.
 
+The studio offers **Pick a real Dress to Try** (a photo with your own garment) and **Pick a virtual Dress to Try** (your photo plus collection references). Own-garment checks support children, adolescents, and adults and tolerate ordinary folds, cropping, and lighting imperfections. They only stop when no person or garment can be identified. The image editor is instructed to preserve the person's identity, apparent age, and body proportions.
+
+Collection filters have separate Type, Store Name, and Brand Name rows. Administrators can save new labels directly while adding a piece, assign store/brand metadata, and upload up to six dress photographs. Photos showing a garment on a model are supported. A photo viewer exposes every saved view, and Google generation receives all views with explicit person/reference roles. Existing one-photo catalog items continue to work.
+
+Verification scripts are included in the repository; generated evidence, synthetic test photographs, and deployment credentials stay in ignored local directories. Run `scripts/catalog_live_verify.py` for scoped live reference/child checks and `scripts/catalog_browser_verify.mjs` for the current catalog UI checks after preparing the disposable session described in deployment documentation. Paid-job replay state uses saved idempotency keys to avoid replacement submissions.
+
 ## Development
 
 Requirements: Node 24, Python 3.12+ (development was checked with 3.14), uv or pip, Google Cloud CLI. Java 21+ and Firebase CLI are needed only for local Auth/Firestore emulators.

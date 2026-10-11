@@ -20,7 +20,7 @@ class NormalizedImage:
     thumbnail: bytes
 
 
-def normalize_image(data: bytes, max_bytes: int = 12 * 1024 * 1024, min_dimension: int = 128) -> NormalizedImage:
+def normalize_image(data: bytes, max_bytes: int = 12 * 1024 * 1024, min_dimension: int = 1) -> NormalizedImage:
     if not data or len(data) > max_bytes:
         raise InvalidImage('Choose an image smaller than 12 MB.')
     try:
@@ -29,8 +29,8 @@ def normalize_image(data: bytes, max_bytes: int = 12 * 1024 * 1024, min_dimensio
             with Image.open(BytesIO(data)) as source:
                 if source.format not in {'JPEG', 'PNG', 'WEBP', 'HEIF', 'HEIC'}:
                     raise InvalidImage('Use JPEG, PNG, WebP or HEIC images.')
-                if min(source.size) < min_dimension or max(source.size) / min(source.size) > 8:
-                    raise InvalidImage('Choose a clear photo at least 128 pixels on each side with a normal portrait aspect ratio.')
+                if min(source.size) < min_dimension:
+                    raise InvalidImage('This image has no usable pixel data.')
                 source.load()
                 oriented = ImageOps.exif_transpose(source)
                 if oriented.mode in {'RGBA', 'LA'} or 'transparency' in oriented.info:

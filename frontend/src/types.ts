@@ -1,6 +1,8 @@
 export type Slot = 'upper' | 'lower' | 'full';
 export interface Category { id:string; name:string; slot:Slot; experimental?:boolean }
-export interface Garment { id:string; name:string; description?:string; category_id:string; active:boolean; image_url:string; thumbnail_url?:string; license?:string; source_url?:string; attribution?:string }
+export interface CatalogLabel { id:string; name:string }
+export interface CatalogLabels { stores:CatalogLabel[]; brands:CatalogLabel[] }
+export interface Garment { id:string; name:string; description?:string; category_id:string; store_id?:string|null; brand_id?:string|null; active:boolean; image_url:string; image_urls?:string[]; thumbnail_url?:string; license?:string; source_url?:string; attribution?:string }
 export interface Account { id:string; email:string; role:'admin'|'user'; active:boolean; must_change_password:boolean }
 export interface Provider { id:string; label:string; configured:boolean; status:string; models:string[]; supports_holding:boolean; supports_multi:boolean; prompt_supported:boolean; resolutions?:string[]; estimated_cost_per_call_usd?:number; model_costs?:Record<string,number> }
 export interface Settings { ai:{provider:string; model:string; resolution:string; system_prompt:string; catalog_prompt:string; holding_prompt:string; timeout_seconds:number}; rate_limits:{max_calls:number; window_seconds:number; daily_user_calls:number; daily_global_calls:number; monthly_budget_usd:number}; gallery:{max_images:number}; providers:Provider[]; pruna_terms_confirmed?:boolean; fashn_credit_usd?:number; pruna_unit_usd?:number }
